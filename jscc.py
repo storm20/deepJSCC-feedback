@@ -10,7 +10,7 @@ import tensorflow_compression as tfc
 import data.dataset_cifar10
 import data.dataset_imagenet
 import data.dataset_kodak
-
+import csv
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 DATASETS = {
@@ -443,6 +443,7 @@ class DeepJSCCF(layers.Layer):
         self.layer = layer_id
         self.encoder = Encoder(conv_depth)
         self.decoder = Decoder(n_channels, name="decoder_output")
+        print("Channel SNR in Model: ",channel_snr)
         self.channel = Channel(channel_type, channel_snr, name="channel_output")
         if self.refinement_layer:
             self.image_combiner = OutputsCombiner(name="out_comb")
@@ -543,7 +544,7 @@ def main(args):
     prev_layer_out = None
     # add input placeholder to please keras
     img = tf.keras.Input(shape=(None, None, 3))
-
+    # print(img.shape)
     if not args.run_eval_once:
         feedback_snr = None if not args.feedback_noise else args.feedback_snr_train
         channel_snr = args.channel_snr_train
@@ -616,13 +617,14 @@ def main(args):
         if (layer == 0 and args.pretrained_base_layer) or glob.glob(ckpt_file + "*"):
             # trick to restore metrics too (see tensorflow guide on saving and
             # serializing subclassed models)
-            model.train_on_batch(x_train)
+            # print("Input data type: ",type(x_train))
+            # model.train_on_batch(x_train)
             if layer == 0 and args.pretrained_base_layer:
                 print("Using pre-trained base layer!")
                 model.load_weights(
                     os.path.join(
                         args.pretrained_base_layer, "ckpt_layer{}".format(layer)
-                    )
+                    ).expect_partial()
                 )
             else:
                 print("Restoring weights from checkpoint!")
@@ -635,20 +637,20 @@ def main(args):
         if not (args.run_eval_once or (layer == 0 and args.pretrained_base_layer)):
             train_patience = 3 if args.dataset_train != "imagenet" else 2
             callbacks = [
-                tf.keras.callbacks.EarlyStopping(
-                    patience=train_patience,
-                    monitor="val_psnr_metric",
-                    min_delta=10e-3,
-                    verbose=1,
-                    mode="max",
-                    restore_best_weights=True,
-                ),
+                # tf.keras.callbacks.EarlyStopping(
+                #     patience=train_patience,
+                #     monitor="psnr_metric",
+                #     min_delta=10e-3,
+                #     verbose=1,
+                #     mode="max",
+                #     restore_best_weights=True,
+                # ),
                 tf.keras.callbacks.TensorBoard(log_dir=args.eval_dir),
                 # just save a single checkpoint with best. If more is wanted,
                 # create a new callback
                 tf.keras.callbacks.ModelCheckpoint(
                     filepath=ckpt_file,
-                    monitor="val_psnr_metric",
+                    monitor="psnr_metric",
                     mode="max",
                     save_best_only=True,
                     verbose=1,
@@ -678,17 +680,29 @@ def main(args):
         # define model as prev_model
         prev_layer_out = layer_output
         all_models.append(model)
-
-    print("EVALUATION!!!")
+    
+    print("EVALUATION LOOP!!!")
     # normally we just eval the complete model, unless we are doing target_analysis
+    # print(all_models[0].summary())
+    header = ['SNR', 'PSNR']
     models = [model] if not args.target_analysis else all_models
+    # args.channel_snr_eval = SNR_list[i]
     for eval_model in models:
         out_eval = eval_model.evaluate(x_tst, verbose=2)
         for m, v in zip(eval_model.metrics_names, out_eval):
             met_name = "_".join(["eval", m])
             print("{}={}".format(met_name, v), end=" ")
-        print()
-        print()
+            if m == "psnr_metric":
+                psnr = v
+    data = [args.channel_snr_eval, psnr]
+    with open('results_5SNR_AWGN.csv', 'a', encoding='UTF8',newline='') as f:
+        writer = csv.writer(f)
+        if args.channel_snr_eval == 0:
+            writer.writerow(header)
+        writer.writerow(data)
+        f.close()
+   
+    
 
 
 def get_dataset(args):
@@ -697,7 +711,7 @@ def get_dataset(args):
     data_options.experimental_optimization.apply_default_optimizations = True
     data_options.experimental_optimization.map_parallelization = True
     data_options.experimental_optimization.parallel_batch = True
-    data_options.experimental_optimization.autotune_buffers = True
+    #data_options.experimental_optimization.autotune_buffers = False
 
     def prepare_dataset(dataset, mode, parse_record_fn, bs):
         dataset = dataset.with_options(data_options)
@@ -772,13 +786,13 @@ if __name__ == "__main__":
     p.add(
         "--model_dir",
         type=str,
-        default="/tmp/train_logs",
+        default="/root/deepJSCC-feedback/tmp/train_logs",
         help=("The location of the model checkpoint files."),
     )
     p.add(
         "--eval_dir",
         type=str,
-        default="/tmp/train_logs/eval",
+        default="/root/deepJSCC-feedback/tmp/train_logs/eval",
         help=("The location of eval files (tensorboard, etc)."),
     )
     p.add(
@@ -825,7 +839,7 @@ if __name__ == "__main__":
     p.add(
         "--learn_rate",
         type=float,
-        default=0.0001,
+        default=0.001,
         help="Learning rate for Adam optimizer",
     )
     p.add(
@@ -867,13 +881,13 @@ if __name__ == "__main__":
     p.add(
         "--data_dir_train",
         type=str,
-        default="/tmp/train_data",
+        default="/root/deepJSCC-feedback/tmp/train_data",
         help="Directory where to store the training data set",
     )
     p.add(
         "--data_dir_eval",
         type=str,
-        default="/tmp/train_data",
+        default="/root/deepJSCC-feedback/tmp/train_data",
         help="Directory where to store the eval data set",
     )
     p.add(
@@ -887,12 +901,30 @@ if __name__ == "__main__":
         default=False,
         help="perform PSNR target analysis",
     )
+    # p.add(
+    #     "--index",
+    #     type=int,
+    #     default=0,
+    #     help="index for evaluation loop",
+    # )
 
     args = p.parse_args()
-
-    print("#######################################")
-    print("Current execution paramenters:")
-    for arg, value in sorted(vars(args).items()):
-        print("{}: {}".format(arg, value))
-    print("#######################################")
-    main(args)
+    
+    if args.run_eval_once:
+        SNR_list = np.linspace(0,25,8)
+        print("#######################################")
+        print("Current execution paramenters:")
+        for arg, value in sorted(vars(args).items()):
+            print("{}: {}".format(arg, value))
+        print("#######################################")
+        for i in range(len(SNR_list)):
+            args.channel_snr_eval = SNR_list[i]
+            # args.index = i
+            main(args)
+    else:
+        print("#######################################")
+        print("Current execution paramenters:")
+        for arg, value in sorted(vars(args).items()):
+            print("{}: {}".format(arg, value))
+        print("#######################################")
+        main(args)
