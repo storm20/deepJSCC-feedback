@@ -786,13 +786,13 @@ if __name__ == "__main__":
     p.add(
         "--model_dir",
         type=str,
-        default="/root/deepJSCC-feedback/tmp/train_logs",
+        default="/tmp/deepJSCC-feedback/tmp/train_logs",
         help=("The location of the model checkpoint files."),
     )
     p.add(
         "--eval_dir",
         type=str,
-        default="/root/deepJSCC-feedback/tmp/train_logs/eval",
+        default="/tmp/deepJSCC-feedback/tmp/train_logs/eval",
         help=("The location of eval files (tensorboard, etc)."),
     )
     p.add(
@@ -881,13 +881,13 @@ if __name__ == "__main__":
     p.add(
         "--data_dir_train",
         type=str,
-        default="/root/deepJSCC-feedback/tmp/train_data",
+        default="/tmp/deepJSCC-feedback/tmp/train_data",
         help="Directory where to store the training data set",
     )
     p.add(
         "--data_dir_eval",
         type=str,
-        default="/root/deepJSCC-feedback/tmp/train_data",
+        default="/tmp/deepJSCC-feedback/tmp/train_data",
         help="Directory where to store the eval data set",
     )
     p.add(
